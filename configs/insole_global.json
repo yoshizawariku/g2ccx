@@ -1,0 +1,8 @@
+{
+  "gcode": "../sample/Insole-L2.gcode.3mf",
+  "sensors": "../sample/moticon_opengo_S5_sensor_coordinates_approx.csv",
+  "gait": "../sample/260410130732_gait.txt",
+  "output": "../output/{timestamp}_insole_global_gait_loads",
+  "side": "left",
+  "body_mass_kg": 53.0
+}

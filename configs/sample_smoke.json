@@ -1,0 +1,8 @@
+{
+  "input": "../sample/Insole-L2.gcode.3mf",
+  "output": "../output/{timestamp}_sample_roi6mm_smoke_0p5mm",
+  "crop_mm": [195, 201, 190, 196, 0, 8],
+  "voxel_mm": 0.2,
+  "displacement_mm": 0.5,
+  "timeout_seconds": 600
+}

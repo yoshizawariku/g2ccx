@@ -1,0 +1,12 @@
+{
+  "input": "../sample/Insole-L2.gcode.3mf",
+  "output": "../output/{timestamp}_sample_roi6mm_fine_steps_2mm",
+  "crop_mm": [195, 201, 190, 196, 0, 8],
+  "voxel_mm": 0.2,
+  "displacement_mm": 2.0,
+  "linear_solver": "PARDISO",
+  "initial_increment": 0.002,
+  "maximum_increment": 0.01,
+  "output_frequency": 5,
+  "timeout_seconds": 900
+}

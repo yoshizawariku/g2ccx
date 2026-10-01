@@ -1,0 +1,13 @@
+{
+  "input": "../sample/Insole-L2.gcode.3mf",
+  "output": "../output/{timestamp}_heel_roi60mm_voxel0p2_2mm",
+  "crop_mm": null,
+  "roi_size_mm": [60, 60],
+  "voxel_mm": 0.2,
+  "displacement_mm": 2.0,
+  "element_type": "C3D8",
+  "initial_increment": 0.005,
+  "maximum_increment": 0.02,
+  "material": {"c10": -0.44, "c01": 4.99, "d1": 0.0},
+  "export_stl": false
+}

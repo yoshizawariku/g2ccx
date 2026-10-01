@@ -1,0 +1,12 @@
+{
+  "input": "../sample/Insole-L2.gcode.3mf",
+  "output": "../output/{timestamp}_sample_roi6mm_c3d8_2mm",
+  "crop_mm": [195, 201, 190, 196, 0, 8],
+  "voxel_mm": 0.2,
+  "displacement_mm": 2.0,
+  "element_type": "C3D8",
+  "initial_increment": 0.005,
+  "maximum_increment": 0.02,
+  "output_frequency": 5,
+  "timeout_seconds": 600
+}

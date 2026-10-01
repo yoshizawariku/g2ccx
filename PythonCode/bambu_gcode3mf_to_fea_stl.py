@@ -40,7 +40,7 @@ import numpy as np
 from skimage.measure import marching_cubes
 
 NUM = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)"
-PARAM_RE = re.compile(r"([XYZIJE])(" + NUM + r")")
+PARAM_RE = re.compile(r"([XYZIJER])(" + NUM + r")")
 MOVE_RE = re.compile(r"^(G[0123])\b")
 
 DEFAULT_FEATURES = {
@@ -74,6 +74,8 @@ def read_gcode(path: Path) -> str:
             candidates = [n for n in zf.namelist() if n.lower().endswith(".gcode")]
             if not candidates:
                 raise RuntimeError("No .gcode member found inside 3MF")
+            if len(candidates) != 1:
+                raise ValueError("Multiple G-code plates found; export one plate or extract the desired .gcode: " + ", ".join(candidates))
             preferred = next((n for n in candidates if n.endswith("plate_1.gcode")), candidates[0])
             return zf.read(preferred).decode("utf-8", errors="ignore")
     return path.read_text(encoding="utf-8", errors="ignore")
@@ -101,10 +103,13 @@ def parse_segments(gcode: str, included_features: set[str]) -> tuple[list[Segmen
     infill_density = config_value(gcode, "sparse_infill_density", None)
 
     pos = np.array([0.0, 0.0, 0.0], dtype=float)
+    coordinate_offset = np.zeros(3)
     feature = "Custom"
     width = default_w
     layer = 0
     relative_e = True
+    relative_xyz = False
+    plane = "G17"
     e_abs = 0.0
     segments: list[Segment] = []
     counts = Counter()
@@ -114,16 +119,36 @@ def parse_segments(gcode: str, included_features: set[str]) -> tuple[list[Segmen
         s = raw.strip()
         if not s:
             continue
+        if s.startswith("; LAYER_HEIGHT:"):
+            layer_h = float(s.split(":", 1)[1])
+            if layer_h <= 0:
+                raise ValueError("Layer height must be positive")
+            continue
+        if not s.startswith(";"):
+            s = s.split(";", 1)[0].strip()
+        if s in {"G90", "G91"}:
+            relative_xyz = s == "G91"
+            continue
+        if s == "G90.1":
+            raise ValueError("Absolute arc centres are unsupported; use relative I/J centres")
+        if s in {"G17", "G18", "G19"}:
+            plane = s
+            continue
+        if s == "G20":
+            raise ValueError("Inch G-code is not supported; export in mm")
         if s == "M82":
             relative_e = False
             continue
         if s == "M83":
             relative_e = True
             continue
-        if s.startswith("G92") and "E" in s:
+        if re.match(r"^G92\b", s):
             vals = dict((k, float(v)) for k, v in PARAM_RE.findall(s))
             if "E" in vals:
                 e_abs = vals["E"]
+            for i, k in enumerate("XYZ"):
+                if k in vals:
+                    coordinate_offset[i] = pos[i] - vals[k]
             continue
         if s.startswith("; FEATURE:"):
             feature = s.split(":", 1)[1].strip()
@@ -144,13 +169,15 @@ def parse_segments(gcode: str, included_features: set[str]) -> tuple[list[Segmen
 
         mm = MOVE_RE.match(s)
         if not mm:
+            if re.match(r"^G\d+", s) and "E" in dict(PARAM_RE.findall(s)) and feature in included_features:
+                raise ValueError(f"Unsupported extrusion command: {s}")
             continue
         cmd = mm.group(1)
         vals = {k: float(v) for k, v in PARAM_RE.findall(s)}
         new = pos.copy()
         for i, k in enumerate("XYZ"):
             if k in vals:
-                new[i] = vals[k]
+                new[i] = pos[i] + vals[k] if relative_xyz else vals[k] + coordinate_offset[i]
 
         extruding = False
         if "E" in vals:
@@ -160,11 +187,18 @@ def parse_segments(gcode: str, included_features: set[str]) -> tuple[list[Segmen
                 extruding = vals["E"] > e_abs + 1e-12
                 e_abs = vals["E"]
 
-        xy_motion = (abs(new[0] - pos[0]) + abs(new[1] - pos[1])) > 1e-12
+        xy_motion = ((abs(new[0] - pos[0]) + abs(new[1] - pos[1])) > 1e-12
+                     or (cmd in {"G2", "G3"} and ("I" in vals or "J" in vals)))
+        if cmd == "G0" and extruding and xy_motion and feature in included_features:
+            raise ValueError(f"Rapid extrusion is unsupported: {s}")
         if cmd in {"G1", "G2", "G3"} and extruding and xy_motion and feature in included_features:
             ij = None
             if cmd in {"G2", "G3"}:
+                if plane != "G17" or "R" in vals or not ("I" in vals or "J" in vals):
+                    raise ValueError(f"Only XY arcs with I/J offsets are supported: {s}")
                 ij = (vals.get("I", 0.0), vals.get("J", 0.0))
+            if width <= 0 or layer_h <= 0:
+                raise ValueError("Bead width and height must be positive")
             segments.append(Segment(pos.copy(), new.copy(), cmd, ij, width, layer_h, feature, layer))
             counts[feature] += 1
         pos = new
@@ -248,87 +282,13 @@ def binary_stl_write(path: Path, verts: np.ndarray, faces: np.ndarray):
 
 
 def reconstruct(segments: list[Segment], voxel: float, crop=None):
-    # First pass: find occupied-point envelope after arc interpolation.
-    # No large point cloud is retained.
-    lo = np.array([np.inf, np.inf, np.inf])
-    hi = np.array([-np.inf, -np.inf, -np.inf])
-    for seg in segments:
-        pts = arc_points(seg, max_step=voxel * 0.6)
-        pts = crop_segment_points(pts, crop)
-        if len(pts) == 0:
-            continue
-        # G-code Z is nozzle/layer top; bead center is ~half a layer below.
-        pts = pts.copy()
-        pts[:, 2] -= seg.height * 0.5
-        margin = np.array([seg.width * 0.55, seg.width * 0.55, seg.height * 0.55])
-        lo = np.minimum(lo, pts.min(axis=0) - margin)
-        hi = np.maximum(hi, pts.max(axis=0) + margin)
-    if not np.isfinite(lo).all():
-        raise RuntimeError("No extrusion points remained after feature/crop filtering")
-
-    # Add safety padding for marching cubes closed surface.
-    pad = 2 * voxel
-    lo -= pad
-    hi += pad
-    shape = np.ceil((hi - lo) / voxel).astype(int) + 1
-    nvox = int(np.prod(shape))
-    print(f"Voxel grid: {tuple(shape)} = {nvox:,} voxels ({nvox/1e6:.1f} M)")
-    if nvox > 250_000_000:
-        raise MemoryError("Grid exceeds 250 M voxels. Increase --voxel or use --crop.")
-    occ = np.zeros(tuple(shape), dtype=np.uint8)
-
-    kernel_cache = {}
-    def offsets_for(width, height):
-        # Quantize to voxel fractions so varying slicer widths do not create thousands of kernels.
-        kw = max(1, int(round(width / voxel * 10)))
-        kh = max(1, int(round(height / voxel * 10)))
-        key = (kw, kh)
-        if key in kernel_cache:
-            return kernel_cache[key]
-        rx = max(width * 0.5, voxel * 0.55)
-        ry = rx
-        rz = max(height * 0.5, voxel * 0.55)
-        nx, ny, nz = [int(math.ceil(r / voxel)) + 1 for r in (rx, ry, rz)]
-        arr = []
-        for i in range(-nx, nx + 1):
-            for j in range(-ny, ny + 1):
-                for k in range(-nz, nz + 1):
-                    # ellipsoidal bead stamp; union along path creates a swept bead
-                    q = ((i * voxel) / rx) ** 2 + ((j * voxel) / ry) ** 2 + ((k * voxel) / rz) ** 2
-                    if q <= 1.0 + 1e-9:
-                        arr.append((i, j, k))
-        out = np.asarray(arr, dtype=np.int16)
-        kernel_cache[key] = out
-        return out
-
-    for si, seg in enumerate(segments, 1):
-        pts = arc_points(seg, max_step=voxel * 0.45)
-        pts = crop_segment_points(pts, crop)
-        if len(pts) == 0:
-            continue
-        pts = pts.copy()
-        pts[:, 2] -= seg.height * 0.5
-        offsets = offsets_for(seg.width, seg.height)
-        centers = np.rint((pts - lo) / voxel).astype(np.int32)
-        # avoid stamping identical neighboring centers repeatedly
-        if len(centers) > 1:
-            keep = np.ones(len(centers), dtype=bool)
-            keep[1:] = np.any(centers[1:] != centers[:-1], axis=1)
-            centers = centers[keep]
-        for c in centers:
-            ids = offsets + c
-            good = ((ids[:,0] >= 0) & (ids[:,0] < shape[0]) &
-                    (ids[:,1] >= 0) & (ids[:,1] < shape[1]) &
-                    (ids[:,2] >= 0) & (ids[:,2] < shape[2]))
-            q = ids[good]
-            occ[q[:,0], q[:,1], q[:,2]] = 1
-        if si % 10000 == 0:
-            print(f"  rasterized {si:,}/{len(segments):,} segments")
-
-    print("Running marching cubes...")
-    verts, faces, _, _ = marching_cubes(occ, level=0.5, spacing=(voxel, voxel, voxel))
-    verts += lo
-    return verts.astype(np.float32), faces.astype(np.int32), lo, hi, shape
+    from fea_geometry import voxelize
+    grid = voxelize(segments, voxel, crop)
+    occupied = np.pad(grid.masks != 0, 1)
+    verts, faces, _, _ = marching_cubes(occupied, 0.5, spacing=(voxel,)*3)
+    verts += grid.origin - voxel/2
+    hi = grid.origin + np.array(grid.masks.shape)*voxel
+    return verts.astype(np.float32), faces.astype(np.int32), grid.origin, hi, np.array(grid.masks.shape)
 
 
 def main():
@@ -350,6 +310,7 @@ def main():
     print(json.dumps(report, indent=2, ensure_ascii=False))
 
     verts, faces, lo, hi, shape = reconstruct(segments, args.voxel, args.crop)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
     binary_stl_write(args.output, verts, faces)
     report.update({
         "voxel_pitch_mm": args.voxel,

@@ -1,0 +1,19 @@
+[project]
+name = "g2ccx"
+version = "0.1.0"
+description = "Bambu toolpaths to CalculiX compression models"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "numpy>=2,<3",
+    "scipy>=1.14,<2",
+    "scikit-image>=0.24,<1",
+    "matplotlib>=3.9,<4",
+    "pyvista>=0.44,<1",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
+
+[tool.pytest.ini_options]
+pythonpath = ["PythonCode"]
+testpaths = ["tests"]

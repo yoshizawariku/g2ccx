@@ -1,0 +1,8 @@
+{
+  "input": "../sample/Insole-L2.gcode.3mf",
+  "output": "../output/{timestamp}_sample_heel60mm_voxel0p2_validation",
+  "crop_mm": [175, 235, 165, 225, 0, 8],
+  "voxel_mm": 0.2,
+  "displacement_mm": 2.0,
+  "export_stl": false
+}
