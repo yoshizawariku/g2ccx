@@ -18,7 +18,7 @@ DEFAULTS = {
     "gcode": None, "sensors": None, "gait": None, "side": "left", "body_mass_kg": 53.0,
     "dx_mm": 1.2, "layers": 6, "classes": 5, "tile_mm": 10.0, "tile_voxel_mm": 0.2,
     "tile_strain": 0.25, "tile_element_type": "C3D8", "tile_timeout_seconds": 10800,
-    "calibration_max_stress_mpa": 0.25, "medial_sign": None, "peak_factor": 1.1, "standing_factor": 0.5,
+    "calibration_max_stress_mpa": 0.25, "sensor_rotation_deg": 0.0, "medial_sign": None, "peak_factor": 1.1, "standing_factor": 0.5,
     "threads": 16, "tile_threads": 6, "timeout_seconds": 7200, "max_solver_dofs": 1_500_000,
     "linear_solver": "PARDISO", "initial_increment": 0.1, "maximum_increment": 0.25, "minimum_increment": 1e-5,
     "solver": None,
@@ -163,6 +163,29 @@ def calibrate(config):
     return result
 
 
+def plot_fits(config):
+    """Tile FEA curves with the fitted Ogden curves -> <output>/figures/tile_fits.png."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    out = Path(config["output"])
+    materials = json.loads((out / "materials.json").read_text(encoding="utf-8"))
+    fig, axes = plt.subplots(1, len(materials), figsize=(4 * len(materials), 3.8))
+    for ax, (c, m) in zip(np.atleast_1d(axes), materials.items()):
+        e, s = np.array(m["strain"]), np.array(m["stress_mpa"]) * 1000
+        ee = np.linspace(0, max(e.max(), 1e-3), 40)
+        fit = [-homog.ogden_uniaxial(1 - x, m["mu_mpa"], m["alpha"], m["d1_per_mpa"])[0] * 1000 for x in ee]
+        ax.plot(e, s, "o", label="tile FEA")
+        ax.plot(ee, fit, "-", label="Ogden fit")
+        ax.set(title=f"class {c}  (H={m['tile_height_mm']:g} mm)", xlabel="nominal strain", ylabel="nominal stress [kPa]")
+        ax.grid(True)
+    np.atleast_1d(axes)[0].legend()
+    fig.tight_layout()
+    (out / "figures").mkdir(exist_ok=True)
+    fig.savefig(out / "figures" / "tile_fits.png", dpi=110)
+    plt.close(fig)
+
+
 def build_cases(config, cases_wanted=None):
     """Write one CalculiX deck per gait case in <output>/cases/<name>."""
     out = Path(config["output"])
@@ -174,7 +197,8 @@ def build_cases(config, cases_wanted=None):
     if missing:
         raise ValueError(f"No calibrated material for classes {missing}; run calibrate after all tiles finish")
     _, _, frame, sensor_xy, _, cases = load_setup(config["gcode"], config["sensors"], config["gait"], config["side"],
-                                                  config["body_mass_kg"], config["medial_sign"])
+                                                  config["body_mass_kg"], config["medial_sign"],
+                                                  sensor_rotation_deg=config["sensor_rotation_deg"])
     dx, nz = config["dx_mm"], config["layers"]
     ox, oy = table["origin"]
     valid = labels >= 0
@@ -311,6 +335,8 @@ def main(args):
     elif args.action == "calibrate":
         for k, v in calibrate(config).items():
             print(k, {n: (round(x, 4) if isinstance(x, float) else x) for n, x in v.items() if n not in ("strain", "stress_mpa")})
+    elif args.action == "fits":
+        plot_fits(config)
     elif args.action == "build":
         print(json.dumps(build_cases(config, args.case or ["all"]), indent=2))
     elif args.action == "solve":

@@ -2,6 +2,18 @@
 
 Bambu Studioのスライス済み `.gcode.3mf` / `.gcode` を、押出経路を反映したvoxel六面体メッシュへ変換し、PrePoMax同梱のCalculiXで解きます。STLの四面体再メッシュは不要です。Python処理はuv環境で動作し、PrePoMaxのGUIを起動せず解析・集計できます。
 
+## 結果イメージ
+
+| ROIの断面ヒートマップ | 3D表示（ROI、変形倍率つき） |
+|---|---|
+| ![断面ビューア](sample/202609301924_viewer_check_images/viewer_test.png) | ![3Dビューア](sample/202609301924_viewer_check_images/viewer3d.png) |
+
+| インソール全体の中のROI（`--context`） | 足裏荷重（歩行の蹴り出し）での全体解析 |
+|---|---|
+| ![ROIとインソール全体](sample/202609301924_viewer_check_images/viewer3d_ctx.png) | ![蹴り出しのvon Mises応力](sample/202610011341_insole_global_results/insole_push_off.png) |
+
+（画像は `sample/` にあるサンプル結果です。各節の手順で再現できます。）
+
 ## セットアップ
 
 リポジトリ直下で実行します。
@@ -10,6 +22,10 @@ Bambu Studioのスライス済み `.gcode.3mf` / `.gcode` を、押出経路を�
 uv sync --locked
 uv run python PythonCode/bambu_fea.py inspect sample/Insole-L2.gcode.3mf --preview output/202609301817_gcode_xy_preview/sample_xy.png
 ```
+
+`inspect` が出力するXY投影図（`--preview`）。青線は押出経路で、踵側がX,Y大（右上）です。
+
+![G-codeのXY投影](sample/202609301817_gcode_xy_preview/sample_xy.png)
 
 Python 3.12の `.venv` と依存ライブラリをuvで管理します。CalculiX（PrePoMax同梱の `ccx_dynamic.exe` など）は同梱していないため、各自の環境で場所を指定します。次の優先順で探します。
 
@@ -45,6 +61,10 @@ uv run python PythonCode/bambu_fea.py run --config configs/heel.json
 ```powershell
 uv run python PythonCode/bambu_fea.py run --config configs/sample_smoke.json
 ```
+
+`sample_smoke` の荷重–沈み込み曲線（`force_displacement.png`）:
+
+![荷重–沈み込み曲線](sample/202609301936_sample_roi6mm_smoke_0p5mm/force_displacement.png)
 
 各段階を個別実行する場合:
 
@@ -165,16 +185,32 @@ G-code全体を0.2 mmでvoxel化してXYのみ0.4 mmに間引いた灰色の表�
 
 ## 足裏全体の荷重解析（均質化モデル）
 
-インソール全体をビード解像度で解くことはできないため、G-codeの内部構造（ジャイロイド・グリッド等）を**タイル圧縮で見かけの材料に均質化**し、外形全体を1.2 mm角の柱×6層の連続体として解きます。Moticon OpenGoの16ch圧力を上面荷重として与えます。設定は `configs/insole_global.json`。
+インソール全体をビード解像度で解くことはできないため、G-codeの内部構造（ジャイロイド・グリッド等）を**タイル圧縮で見かけの材料に均質化**し、外形全体を1.2 mm角の柱×6層の連続体として解きます。Moticon OpenGoの16ch圧力を上面荷重として与えます。設定は `configs/insole_global.json`（`sensor_rotation_deg` で、基準インソールと印刷したインソールの差を補うセンサ配置の回転を時計回りの度数で指定できます）。
 
 ```powershell
 uv run python PythonCode/bambu_fea.py insole prepare   --config configs/insole_global.json   # 柱の高さ・充填率をクラス分けし、代表タイルを選定
 uv run python PythonCode/bambu_fea.py insole tiles     --config configs/insole_global.json   # クラスごとの10 mm角タイルを0.2 mm voxelで圧縮（並列・数時間）
 uv run python PythonCode/bambu_fea.py insole calibrate --config configs/insole_global.json   # 応力–ひずみ曲線に圧縮性Ogdenを当てはめ materials.json
+uv run python PythonCode/bambu_fea.py insole fits      --config configs/insole_global.json   # 当てはめ曲線の図 figures/tile_fits.png
 uv run python PythonCode/bambu_fea.py insole build     --config configs/insole_global.json   # 荷重ケースごとにINPを生成
 uv run python PythonCode/bambu_fea.py insole solve     --config configs/insole_global.json   # 全ケースを解く（1ケース数分）
 uv run python PythonCode/bambu_fea.py view --3d --output output/<yyyymmddhhmm>_insole_global_gait_loads/cases/standing
 ```
+
+センサ配置の確認図（`sensor_rotation_deg: 5`。左: 配置、右: 立位・踵接地・蹴り出しの圧力マップ）:
+
+![センサ配置](sample/202609302156_sensor_layout_check/sensor_check_rot5.png)
+![圧力マップ](sample/202609302156_sensor_layout_check/sensor_check_rot5_cases.png)
+
+タイル圧縮の応力–ひずみ曲線と当てはめ（`insole fits`）。クラス0は圧縮3%・14 kPaまでしか同定できていません:
+
+![タイル圧縮と当てはめ](sample/202610011341_insole_global_results/tile_fits.png)
+
+全体解析の結果（von Mises応力。左から立位、踵接地、蹴り出し。画面下側が踵、上側がつま先）:
+
+| 立位 | 踵接地 | 蹴り出し |
+|---|---|---|
+| ![立位](sample/202610011341_insole_global_results/insole_standing.png) | ![踵接地](sample/202610011341_insole_global_results/insole_heel_strike.png) | ![蹴り出し](sample/202610011341_insole_global_results/insole_push_off.png) |
 
 - **インフィル形状の反映**: 各柱の高さ・全体/底面/上面の充填率でクラス分けし、クラスごとの代表タイルを**実際のG-codeのままビード解像度で圧縮**して材料を同定します。グリッドなど別のG-codeに差し替えて `prepare` からやり直すと、応答の違いが全体解析に反映されます。
 - **荷重**: `260410130732_gait.txt` の左足16chの圧力を、`plan/Insoleセンサ座標.txt` の位置（踵端からの距離y、内側が正のx）でインソール座標に置き、ガウス核で補間します。合計が指定の力になるよう規格化します。足の向きは外形の主軸から自動判定します（踵はX,Y大の側、内側はくびれの深い側）。

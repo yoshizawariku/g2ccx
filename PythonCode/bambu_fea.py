@@ -153,7 +153,7 @@ def main(argv=None):
     parser.add_argument("input",type=Path)
     parser.add_argument("--preview",type=Path,help="Save an XY preview PNG")
     parser = sub.add_parser("insole",help="Whole-insole homogenised gait-load analysis")
-    parser.add_argument("action",choices=["prepare","tiles","calibrate","build","solve"])
+    parser.add_argument("action",choices=["prepare","tiles","calibrate","fits","build","solve"])
     parser.add_argument("--config",type=Path,required=True)
     parser.add_argument("--case",nargs="*",help="Gait case names (default: all)")
     parser = sub.add_parser("view",help="Open the heat-map slice viewer for a finished analysis")

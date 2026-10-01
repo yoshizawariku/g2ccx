@@ -4,5 +4,6 @@
   "gait": "../sample/260410130732_gait.txt",
   "output": "../output/{timestamp}_insole_global_gait_loads",
   "side": "left",
-  "body_mass_kg": 53.0
+  "body_mass_kg": 53.0,
+  "sensor_rotation_deg": 5.0
 }
