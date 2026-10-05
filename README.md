@@ -21,6 +21,7 @@ Bambu Studioのスライス済み `.gcode.3mf` / `.gcode` を、押出経路を�
 ```powershell
 uv sync --locked
 uv run python PythonCode/bambu_fea.py inspect sample/Insole-L2.gcode.3mf --preview output/202609301817_gcode_xy_preview/sample_xy.png
+# ↑　gcodeの確認を行う．ファイル名は適宜変更．
 ```
 
 `inspect` が出力するXY投影図（`--preview`）。青線は押出経路で、踵側がX,Y大（右上）です。
